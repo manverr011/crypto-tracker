@@ -20,7 +20,7 @@ creds_file = StringIO(json.dumps(creds_dict))
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
-SHEET_NAME = os.getenv("SHEET_NAME")  # Ensure this is set
+SHEET_NAME = os.getenv("SHEET_NAME", "Crypto_Tracker")  # Default value added
 if not SHEET_NAME:
     raise ValueError("Missing SHEET_NAME environment variable")
 
