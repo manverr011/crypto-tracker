@@ -1,79 +1,132 @@
-import os
-import json
-from io import StringIO
-from oauth2client.service_account import ServiceAccountCredentials
+import asyncio
+import aiohttp
 import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime, timedelta
+import random
 
-# Read credentials from environment variable
-credentials_json = os.getenv("GOOGLE_CREDENTIALS")
-creds_dict = json.loads(credentials_json)
-creds_file = StringIO(json.dumps(creds_dict))
+# ---- Fix Windows event loop issue ----
+import platform
+if platform.system() == "Windows":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# Authenticate with Google Sheets
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-client = gspread.authorize(creds)
-
+# ---- Google Sheets Authentication ----
+CREDENTIALS_FILE = "your_google_credentials.json"
 SHEET_NAME = "Crypto_Tracker"
-sheet = client.open(SHEET_NAME).sheet1
 
-# ---- Step 2: Fetch all USDT pairs ----
+# Connect to Google Sheets
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
+client = gspread.authorize(creds)
+sheet = client.open(SHEET_NAME).sheet1  # First sheet
+
+# ---- Step 2: Fetch All USDT Trading Pairs ----
 async def get_usdt_pairs():
     url = "https://api.binance.com/api/v3/exchangeInfo"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            data = await response.json()
-            return [s["symbol"] for s in data["symbols"] if s["symbol"].endswith("USDT")]
+    max_retries = 5
+    
+    for attempt in range(max_retries):
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(url) as response:
+                    data = await response.json()
+                    
+                    if "symbols" not in data:
+                        raise KeyError("Missing 'symbols' in Binance response")
 
-# ---- Step 3: Fetch real-time prices ----
-async def get_prices(session, symbol):
-    url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
-    async with session.get(url) as response:
-        data = await response.json()
-        return symbol, float(data["price"])
+                    return [s["symbol"] for s in data["symbols"] if s["symbol"].endswith("USDT")]
 
-# ---- Step 4: Fetch previous day's closing price ----
-async def get_last_closing_price(session, symbol):
+        except (aiohttp.ClientError, KeyError) as e:
+            wait_time = 2 ** attempt + random.uniform(0, 1)  # Exponential backoff
+            print(f"⚠️ Error fetching USDT pairs (attempt {attempt + 1}): {e}. Retrying in {wait_time:.2f}s...")
+            await asyncio.sleep(wait_time)
+
+    print("❌ Failed to fetch USDT pairs after multiple attempts.")
+    return []
+
+# ---- Step 3: Fetch Live Prices in Batches ----
+async def fetch_prices(symbols):
+    url = "https://api.binance.com/api/v3/ticker/price"
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get(url) as response:
+                data = await response.json()
+                return {item["symbol"]: float(item["price"]) for item in data if item["symbol"] in symbols}
+    except Exception as e:
+        print(f"⚠️ Error fetching prices: {e}")
+        return {}
+
+# ---- Step 4: Fetch Previous Day's Closing Prices ----
+async def fetch_historical_data(symbols):
     url = "https://api.binance.com/api/v3/klines"
     end_time = int(datetime.utcnow().timestamp() * 1000)
     start_time = int((datetime.utcnow() - timedelta(days=1)).timestamp() * 1000)
-    params = {
-        "symbol": symbol,
-        "interval": "1d",
-        "startTime": start_time,
-        "endTime": end_time,
-        "limit": 1
-    }
-    async with session.get(url, params=params) as response:
-        data = await response.json()
-        if data:
-            return symbol, float(data[0][4])  # Closing price
-        return symbol, None
+    
+    closing_prices = {}
+    batch_size = 10  # ✅ Fetch data in smaller batches to avoid overload
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        for i in range(0, len(symbols), batch_size):
+            batch_symbols = symbols[i:i + batch_size]
+            tasks = [
+                session.get(url, params={
+                    "symbol": symbol,
+                    "interval": "1d",
+                    "startTime": start_time,
+                    "endTime": end_time,
+                    "limit": 1
+                }) for symbol in batch_symbols
+            ]
+            
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for symbol, response in zip(batch_symbols, responses):
+                if isinstance(response, Exception):
+                    print(f"⚠️ Error fetching historical data for {symbol}: {response}")
+                    closing_prices[symbol] = "N/A"
+                    continue
+                
+                try:
+                    data = await response.json()
+                    closing_prices[symbol] = float(data[0][4]) if data else "N/A"
+                except Exception as e:
+                    print(f"⚠️ Error parsing data for {symbol}: {e}")
+                    closing_prices[symbol] = "N/A"
+
+    return closing_prices
 
 # ---- Step 5: Update Google Sheets ----
 async def update_google_sheet():
     usdt_pairs = await get_usdt_pairs()
-    async with aiohttp.ClientSession() as session:
-        price_tasks = [get_prices(session, pair) for pair in usdt_pairs]
-        close_tasks = [get_last_closing_price(session, pair) for pair in usdt_pairs]
-        
-        prices = await asyncio.gather(*price_tasks)
-        closing_prices = await asyncio.gather(*close_tasks)
-
-    price_dict = dict(prices)
-    closing_dict = dict(closing_prices)
+    if not usdt_pairs:
+        print("❌ No USDT pairs found, skipping update.")
+        return
     
-    timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-    update_data = [["Symbol", "Current Price", "Last Close Price", "Updated At"]] + \
-                  [[s, price_dict[s], closing_dict.get(s, "N/A"), timestamp] for s in usdt_pairs]
-    
-    sheet.update("A1", update_data)
-    print(f"[{timestamp}] Google Sheet updated successfully!")
+    # Fetch live and historical prices
+    live_prices, closing_prices = await asyncio.gather(
+        fetch_prices(usdt_pairs),
+        fetch_historical_data(usdt_pairs)
+    )
 
-# ---- Step 6: Run the script every second ----
+    # Prepare data for Google Sheets
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    update_data = [["Symbol", "Price", "Last Close", "Updated At"]]
+    update_data += [[s, live_prices.get(s, "N/A"), closing_prices.get(s, "N/A"), timestamp] for s in usdt_pairs]
+
+    # ✅ Google Sheets Rate Limit Fix - Splitting updates into chunks
+    chunk_size = 50
+    for i in range(0, len(update_data), chunk_size):
+        try:
+            sheet.batch_update([{"range": f"A{i+1}", "values": update_data[i:i+chunk_size]}])
+            print(f"[{timestamp}] ✅ Google Sheet updated successfully! ({i+1}-{i+chunk_size})")
+        except Exception as e:
+            print(f"⚠️ Error updating Google Sheets: {e}")
+            await asyncio.sleep(5)  # Wait before retrying to avoid rate limits
+
+# ---- Step 6: Run Update Every 5 Seconds ----
 async def main():
     while True:
         await update_google_sheet()
-        await asyncio.sleep(1)  # Update every second
+        await asyncio.sleep(5)  # Update every 5 seconds
 
 asyncio.run(main())
