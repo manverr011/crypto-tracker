@@ -1,12 +1,18 @@
 import asyncio
 import aiohttp
 import gspread
+import os
+import json
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 import random
+from io import StringIO
 
 # Read credentials from environment variable
 credentials_json = os.getenv("GOOGLE_CREDENTIALS")
+if not credentials_json:
+    raise ValueError("Missing Google credentials in environment variables")
+
 creds_dict = json.loads(credentials_json)
 creds_file = StringIO(json.dumps(creds_dict))
 
@@ -14,6 +20,10 @@ creds_file = StringIO(json.dumps(creds_dict))
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
+SHEET_NAME = os.getenv("SHEET_NAME")  # Ensure this is set
+if not SHEET_NAME:
+    raise ValueError("Missing SHEET_NAME environment variable")
+
 sheet = client.open(SHEET_NAME).sheet1  # First sheet
 
 # ---- Step 2: Fetch All USDT Trading Pairs ----
@@ -109,15 +119,11 @@ async def update_google_sheet():
     update_data = [["Symbol", "Price", "Last Close", "Updated At"]]
     update_data += [[s, live_prices.get(s, "N/A"), closing_prices.get(s, "N/A"), timestamp] for s in usdt_pairs]
 
-    # ✅ Google Sheets Rate Limit Fix - Splitting updates into chunks
-    chunk_size = 50
-    for i in range(0, len(update_data), chunk_size):
-        try:
-            sheet.batch_update([{"range": f"A{i+1}", "values": update_data[i:i+chunk_size]}])
-            print(f"[{timestamp}] ✅ Google Sheet updated successfully! ({i+1}-{i+chunk_size})")
-        except Exception as e:
-            print(f"⚠️ Error updating Google Sheets: {e}")
-            await asyncio.sleep(5)  # Wait before retrying to avoid rate limits
+    try:
+        sheet.update("A1", update_data)
+        print(f"[{timestamp}] ✅ Google Sheet updated successfully!")
+    except Exception as e:
+        print(f"⚠️ Error updating Google Sheets: {e}")
 
 # ---- Step 6: Run Update Every 5 Seconds ----
 async def main():
@@ -125,4 +131,5 @@ async def main():
         await update_google_sheet()
         await asyncio.sleep(5)  # Update every 5 seconds
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
