@@ -137,7 +137,7 @@ async def start_server():
     port = int(os.getenv("PORT", 8080))  # Render assigns a PORT dynamically
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
+    site = web.TCPSite(runner, "44.227.217.144", port)
     await site.start()
     print(f"✅ Dummy server started on port {port}")
 
