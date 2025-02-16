@@ -1,17 +1,18 @@
-import os
-import json
 import asyncio
 import aiohttp
 import gspread
-from io import StringIO
+import os
+import json
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 import random
+from io import StringIO
+from aiohttp import web
 
-# Read credentials from environment variable
+# ---- Step 1: Authenticate with Google Sheets ----
 credentials_json = os.getenv("GOOGLE_CREDENTIALS")
 if not credentials_json:
-    raise ValueError("GOOGLE_CREDENTIALS environment variable not set.")
+    raise ValueError("Missing Google credentials in environment variables")
 
 creds_dict = json.loads(credentials_json)
 creds_file = StringIO(json.dumps(creds_dict))
@@ -20,12 +21,11 @@ creds_file = StringIO(json.dumps(creds_dict))
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
+SHEET_NAME = os.getenv("SHEET_NAME", "Crypto_Tracker")  # Default value added
+if not SHEET_NAME:
+    raise ValueError("Missing SHEET_NAME environment variable")
 
-SHEET_NAME = os.getenv("SHEET_NAME", "Crypto_Tracker")  # Ensure this matches your Google Sheet name
-try:
-    sheet = client.open(SHEET_NAME).sheet1  # First sheet
-except gspread.exceptions.SpreadsheetNotFound:
-    raise ValueError(f"Spreadsheet '{SHEET_NAME}' not found. Check if the name is correct.")
+sheet = client.open(SHEET_NAME).sheet1  # First sheet
 
 # ---- Step 2: Fetch All USDT Trading Pairs ----
 async def get_usdt_pairs():
@@ -120,14 +120,33 @@ async def update_google_sheet():
     update_data = [["Symbol", "Price", "Last Close", "Updated At"]]
     update_data += [[s, live_prices.get(s, "N/A"), closing_prices.get(s, "N/A"), timestamp] for s in usdt_pairs]
 
-    # ✅ Google Sheets Rate Limit Fix - Splitting updates into chunks
-    chunk_size = 50
-    for i in range(0, len(update_data), chunk_size):
-        try:
-            sheet.batch_update([{"range": f"A{i+1}", "values": update_data[i:i+chunk_size]}])
-            print(f"[{timestamp}] ✅ Google Sheet updated successfully! ({i+1}-{i+chunk_size})")
-        except Exception as e:
-            print(f"⚠️ Error updating Google Sheets: {e}")
-            await asyncio.sleep(5)  # Wait before retrying to avoid rate limits
+    try:
+        sheet.update("A1", update_data)
+        print(f"[{timestamp}] ✅ Google Sheet updated successfully!")
+    except Exception as e:
+        print(f"⚠️ Error updating Google Sheets: {e}")
 
-# ---- Step
+# ---- Step 6: Start Dummy Web Server for Render ----
+async def handle(request):
+    return web.Response(text="Server running - Binance Tracker is active!")
+
+app = web.Application()
+app.router.add_get("/", handle)
+
+async def start_server():
+    port = int(os.getenv("PORT", 8080))  # Render assigns a PORT dynamically
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"✅ Dummy server started on port {port}")
+
+# ---- Step 7: Run Everything ----
+async def main():
+    await asyncio.gather(
+        start_server(),  # Keeps Render running
+        update_google_sheet()  # Binance tracker updates Google Sheets
+    )
+
+if __name__ == "__main__":
+    asyncio.run(main())
