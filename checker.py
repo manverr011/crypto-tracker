@@ -134,18 +134,27 @@ app = web.Application()
 app.router.add_get("/", handle)
 
 async def start_server():
-    port = int(os.getenv("PORT", 8080))  # Render assigns a PORT dynamically
+    port = int(os.getenv("PORT", "8080"))  # ✅ Default to 8080 if no PORT is set
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "44.227.217.144", port)
-    await site.start()
-    print(f"✅ Dummy server started on port {port}")
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    print(f"✅ Starting server on port {port}...")
+    
+    try:
+        await site.start()
+        print(f"✅ Server running on port {port}!")
+    except OSError as e:
+        print(f"❌ Port binding error: {e}. Retrying with port 8080...")
+        await site.stop()
+        site = web.TCPSite(runner, "0.0.0.0", 8080)
+        await site.start()
+        print("✅ Server started on fallback port 8080.")
 
 # ---- Step 7: Run Everything ----
 async def main():
     await asyncio.gather(
         start_server(),  # Keeps Render running
-        update_google_sheet()  # Binance tracker updates Google Sheets
+        update_google_sheet()  # Crypto_Tracker updates Google Sheets
     )
 
 if __name__ == "__main__":
