@@ -14,7 +14,7 @@ scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 
-SHEET_NAME = "USDT_Pairs_Tracker"
+SHEET_NAME = "Crypto_Tracker"
 sheet = client.open(SHEET_NAME).sheet1
 
 # ---- Step 2: Fetch all USDT pairs ----
