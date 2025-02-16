@@ -5,18 +5,14 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 import random
 
-# ---- Fix Windows event loop issue ----
-import platform
-if platform.system() == "Windows":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+# Read credentials from environment variable
+credentials_json = os.getenv("GOOGLE_CREDENTIALS")
+creds_dict = json.loads(credentials_json)
+creds_file = StringIO(json.dumps(creds_dict))
 
-# ---- Google Sheets Authentication ----
-CREDENTIALS_FILE = "your_google_credentials.json"
-SHEET_NAME = "Crypto_Tracker"
-
-# Connect to Google Sheets
+# Authenticate with Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open(SHEET_NAME).sheet1  # First sheet
 
