@@ -31,19 +31,24 @@ sheet = client.open(SHEET_NAME).sheet1  # First sheet
 async def get_usdt_pairs():
     url = "https://api.binance.com/api/v3/exchangeInfo"
     max_retries = 5
-    
+
     for attempt in range(max_retries):
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
                 async with session.get(url) as response:
+                    if response.status != 200:
+                        raise Exception(f"HTTP {response.status} - Binance API issue")
+
                     data = await response.json()
-                    
+
+                    # Debug: Print response to check if it contains 'symbols'
                     if "symbols" not in data:
+                        print(f"⚠️ Unexpected Binance response: {data}")
                         raise KeyError("Missing 'symbols' in Binance response")
 
                     return [s["symbol"] for s in data["symbols"] if s["symbol"].endswith("USDT")]
 
-        except (aiohttp.ClientError, KeyError) as e:
+        except (aiohttp.ClientError, KeyError, Exception) as e:
             wait_time = 2 ** attempt + random.uniform(0, 1)  # Exponential backoff
             print(f"⚠️ Error fetching USDT pairs (attempt {attempt + 1}): {e}. Retrying in {wait_time:.2f}s...")
             await asyncio.sleep(wait_time)
