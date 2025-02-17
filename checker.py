@@ -29,7 +29,7 @@ sheet = client.open(SHEET_NAME).sheet1  # First sheet
 
 # ---- Step 2: Fetch All USDT Trading Pairs ----
 async def get_usdt_pairs():
-    url = "https://api.binance.com/api/v3/exchangeInfo"
+    url = "url = "https://api.binance.us/api/v3/exchangeInfo"
     max_retries = 5
 
     for attempt in range(max_retries):
