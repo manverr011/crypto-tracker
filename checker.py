@@ -41,7 +41,7 @@ async def get_usdt_pairs():
         ) as session:
             async with session.get(url, headers=HEADERS) as response:
                 data = await response.json()
-                return [s["symbol"] for s in data["symbols"] if s["symbol"].endswith("USDT")]
+                return [s["symbol"] for s in data.get("symbols", []) if s["symbol"].endswith("USDT")]
     except Exception as e:
         print(f"⚠️ Error fetching USDT pairs: {e}")
         return []
@@ -100,27 +100,28 @@ async def fetch_historical_data(symbols):
 # ---- Update Google Sheets Every Second ----
 async def update_google_sheet():
     while True:
-        usdt_pairs = await get_usdt_pairs()
-        if not usdt_pairs:
-            await asyncio.sleep(1)
-            continue
-        
-        live_prices, closing_prices = await asyncio.gather(
-            fetch_prices(usdt_pairs),
-            fetch_historical_data(usdt_pairs)
-        )
-
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        update_data = [["Symbol", "Price", "Last Close", "Updated At"]]
-        update_data += [[s, live_prices.get(s, "N/A"), closing_prices.get(s, "N/A"), timestamp] for s in usdt_pairs]
-
         try:
+            usdt_pairs = await get_usdt_pairs()
+            if not usdt_pairs:
+                print("⚠️ No USDT pairs found. Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+                continue
+            
+            live_prices, closing_prices = await asyncio.gather(
+                fetch_prices(usdt_pairs),
+                fetch_historical_data(usdt_pairs)
+            )
+
+            timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            update_data = [["Symbol", "Price", "Last Close", "Updated At"]]
+            update_data += [[s, live_prices.get(s, "N/A"), closing_prices.get(s, "N/A"), timestamp] for s in usdt_pairs]
+
             sheet.update(range_name="A1", values=update_data)
             print(f"[{timestamp}] ✅ Google Sheet updated!")
         except Exception as e:
-            print(f"⚠️ Error updating Google Sheets: {e}")
+            print(f"⚠️ Error updating Google Sheets: {e}. Retrying in 5 seconds...")
         
-        await asyncio.sleep(1)  # Update every second
+        await asyncio.sleep(5)  # Update every 5 seconds
 
 # ---- Start Web Server ----
 async def handle(request):
