@@ -28,54 +28,57 @@ if not SHEET_NAME:
 sheet = client.open(SHEET_NAME).sheet1  # First sheet
 
 # ---- Binance API Configuration ----
-BINANCE_API_KEY = "MiHw4ZyTFiZVDwGxdORAW0PbXqzchwGLmWoE25tt0XDoGnv436T3N0nA3tQvSVYg"  # Binance API Key
-
-PROXY = "http://kvezofhh-8:jghgxvtmmh51@p.webshare.io:80"
-
+BINANCE_API_KEY = os.getenv("MiHw4ZyTFiZVDwGxdORAW0PbXqzchwGLmWoE25tt0XDoGnv436T3N0nA3tQvSVYg")  # Load from environment
+PROXIES = [
+    "http://kvezofhh-8:jghgxvtmmh51@p.webshare.io:80"
+]
 HEADERS = {"X-MBX-APIKEY": BINANCE_API_KEY} if BINANCE_API_KEY else {}
 
 # ---- Fetch All USDT Trading Pairs ----
 async def get_usdt_pairs():
     url = "https://api.binance.us/api/v3/exchangeInfo"
+    proxy = random.choice(PROXIES)  # Rotate proxy
+
     try:
         async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=10),
+            timeout=aiohttp.ClientTimeout(total=5),
             connector=aiohttp.TCPConnector(ssl=False)
         ) as session:
-            async with session.get(url, headers=HEADERS, proxy=PROXY) as response:
+            async with session.get(url, headers=HEADERS, proxy=proxy) as response:
                 data = await response.json()
-                return [s["symbol"] for s in data.get("symbols", []) if s["symbol"].endswith("USDT")]
+                return [s["symbol"] for s in data["symbols"] if s["symbol"].endswith("USDT")]
     except Exception as e:
         print(f"⚠️ Error fetching USDT pairs: {e}")
         return []
 
-
 # ---- Fetch Live Prices ----
 async def fetch_prices(symbols):
     url = "https://api.binance.us/api/v3/ticker/price"
+    proxy = random.choice(PROXIES)
+
     try:
         async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=10),
+            timeout=aiohttp.ClientTimeout(total=5),
             connector=aiohttp.TCPConnector(ssl=False)
         ) as session:
-            async with session.get(url, headers=HEADERS, proxy=PROXY) as response:
+            async with session.get(url, headers=HEADERS, proxy=proxy) as response:
                 data = await response.json()
                 return {item["symbol"]: float(item["price"]) for item in data if item["symbol"] in symbols}
     except Exception as e:
         print(f"⚠️ Error fetching prices: {e}")
         return {}
 
-
 # ---- Fetch Previous Day's Closing Prices ----
 async def fetch_historical_data(symbols):
     url = "https://api.binance.us/api/v3/klines"
     end_time = int(datetime.utcnow().timestamp() * 1000)
     start_time = int((datetime.utcnow() - timedelta(days=1)).timestamp() * 1000)
+    proxy = random.choice(PROXIES)
 
     closing_prices = {}
 
     async with aiohttp.ClientSession(
-        timeout=aiohttp.ClientTimeout(total=10),
+        timeout=aiohttp.ClientTimeout(total=5),
         connector=aiohttp.TCPConnector(ssl=False)
     ) as session:
         tasks = [
@@ -85,49 +88,48 @@ async def fetch_historical_data(symbols):
                 "startTime": start_time,
                 "endTime": end_time,
                 "limit": 1
-            }, headers=HEADERS, proxy=PROXY) for symbol in symbols
+            }, headers=HEADERS, proxy=proxy) for symbol in symbols
         ]
 
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
         for symbol, response in zip(symbols, responses):
             if isinstance(response, Exception):
-                print(f"⚠️ Error fetching historical data for {symbol}: {response}")
                 closing_prices[symbol] = "N/A"
                 continue
 
             try:
                 data = await response.json()
                 closing_prices[symbol] = float(data[0][4]) if data else "N/A"
-            except Exception as e:
-                print(f"⚠️ Error parsing data for {symbol}: {e}")
+            except:
                 closing_prices[symbol] = "N/A"
 
     return closing_prices
 
-
-# ---- Update Google Sheets ----
+# ---- Update Google Sheets Every Second ----
 async def update_google_sheet():
-    usdt_pairs = await get_usdt_pairs()
-    if not usdt_pairs:
-        print("❌ No USDT pairs found, skipping update.")
-        return
-    
-    live_prices, closing_prices = await asyncio.gather(
-        fetch_prices(usdt_pairs),
-        fetch_historical_data(usdt_pairs)
-    )
+    while True:
+        usdt_pairs = await get_usdt_pairs()
+        if not usdt_pairs:
+            await asyncio.sleep(1)
+            continue
+        
+        live_prices, closing_prices = await asyncio.gather(
+            fetch_prices(usdt_pairs),
+            fetch_historical_data(usdt_pairs)
+        )
 
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    update_data = [["Symbol", "Price", "Last Close", "Updated At"]]
-    update_data += [[s, live_prices.get(s, "N/A"), closing_prices.get(s, "N/A"), timestamp] for s in usdt_pairs]
+        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        update_data = [["Symbol", "Price", "Last Close", "Updated At"]]
+        update_data += [[s, live_prices.get(s, "N/A"), closing_prices.get(s, "N/A"), timestamp] for s in usdt_pairs]
 
-    try:
-        sheet.update(range_name="A1", values=update_data)
-        print(f"[{timestamp}] ✅ Google Sheet updated successfully!")
-    except Exception as e:
-        print(f"⚠️ Error updating Google Sheets: {e}")
-
+        try:
+            sheet.update(range_name="A1", values=update_data)
+            print(f"[{timestamp}] ✅ Google Sheet updated!")
+        except Exception as e:
+            print(f"⚠️ Error updating Google Sheets: {e}")
+        
+        await asyncio.sleep(1)  # Update every second
 
 # ---- Start Web Server ----
 async def handle(request):
@@ -141,18 +143,8 @@ async def start_server():
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
-    print(f"✅ Starting server on port {port}...")
-    
-    try:
-        await site.start()
-        print(f"✅ Server running on port {port}!")
-    except OSError as e:
-        print(f"❌ Port binding error: {e}. Retrying with port 8080...")
-        await site.stop()
-        site = web.TCPSite(runner, "0.0.0.0", 8080)
-        await site.start()
-        print("✅ Server started on fallback port 8080.")
-
+    await site.start()
+    print(f"✅ Server running on port {port}!")
 
 # ---- Run Everything ----
 async def main():
