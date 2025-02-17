@@ -29,22 +29,17 @@ sheet = client.open(SHEET_NAME).sheet1  # First sheet
 
 # ---- Binance API Configuration ----
 BINANCE_API_KEY = os.getenv("MiHw4ZyTFiZVDwGxdORAW0PbXqzchwGLmWoE25tt0XDoGnv436T3N0nA3tQvSVYg")  # Load from environment
-PROXIES = [
-    "http://kvezofhh-8:jghgxvtmmh51@p.webshare.io:80"
-]
 HEADERS = {"X-MBX-APIKEY": BINANCE_API_KEY} if BINANCE_API_KEY else {}
 
 # ---- Fetch All USDT Trading Pairs ----
 async def get_usdt_pairs():
     url = "https://api.binance.us/api/v3/exchangeInfo"
-    proxy = random.choice(PROXIES)  # Rotate proxy
-
     try:
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=5),
             connector=aiohttp.TCPConnector(ssl=False)
         ) as session:
-            async with session.get(url, headers=HEADERS, proxy=proxy) as response:
+            async with session.get(url, headers=HEADERS) as response:
                 data = await response.json()
                 return [s["symbol"] for s in data["symbols"] if s["symbol"].endswith("USDT")]
     except Exception as e:
@@ -54,14 +49,12 @@ async def get_usdt_pairs():
 # ---- Fetch Live Prices ----
 async def fetch_prices(symbols):
     url = "https://api.binance.us/api/v3/ticker/price"
-    proxy = random.choice(PROXIES)
-
     try:
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=5),
             connector=aiohttp.TCPConnector(ssl=False)
         ) as session:
-            async with session.get(url, headers=HEADERS, proxy=proxy) as response:
+            async with session.get(url, headers=HEADERS) as response:
                 data = await response.json()
                 return {item["symbol"]: float(item["price"]) for item in data if item["symbol"] in symbols}
     except Exception as e:
@@ -73,8 +66,6 @@ async def fetch_historical_data(symbols):
     url = "https://api.binance.us/api/v3/klines"
     end_time = int(datetime.utcnow().timestamp() * 1000)
     start_time = int((datetime.utcnow() - timedelta(days=1)).timestamp() * 1000)
-    proxy = random.choice(PROXIES)
-
     closing_prices = {}
 
     async with aiohttp.ClientSession(
@@ -88,7 +79,7 @@ async def fetch_historical_data(symbols):
                 "startTime": start_time,
                 "endTime": end_time,
                 "limit": 1
-            }, headers=HEADERS, proxy=proxy) for symbol in symbols
+            }, headers=HEADERS) for symbol in symbols
         ]
 
         responses = await asyncio.gather(*tasks, return_exceptions=True)
