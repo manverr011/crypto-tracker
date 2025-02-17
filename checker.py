@@ -28,27 +28,27 @@ if not SHEET_NAME:
 sheet = client.open(SHEET_NAME).sheet1  # First sheet
 
 # ---- Step 2: Fetch All USDT Trading Pairs ----
+PROXY = "http://kvezofhh:jghgxvtmmh51@173.211.0.148:6641"
+
 async def get_usdt_pairs():
-    url = "url = "https://api.binance.us/api/v3/exchangeInfo"
+    url = "https://api.binance.com/api/v3/exchangeInfo"
     max_retries = 5
 
     for attempt in range(max_retries):
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        raise Exception(f"HTTP {response.status} - Binance API issue")
-
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=10),
+                connector=aiohttp.TCPConnector(ssl=False)
+            ) as session:
+                async with session.get(url, proxy=PROXY) as response:
                     data = await response.json()
 
-                    # Debug: Print response to check if it contains 'symbols'
                     if "symbols" not in data:
-                        print(f"⚠️ Unexpected Binance response: {data}")
                         raise KeyError("Missing 'symbols' in Binance response")
 
                     return [s["symbol"] for s in data["symbols"] if s["symbol"].endswith("USDT")]
 
-        except (aiohttp.ClientError, KeyError, Exception) as e:
+        except (aiohttp.ClientError, KeyError) as e:
             wait_time = 2 ** attempt + random.uniform(0, 1)  # Exponential backoff
             print(f"⚠️ Error fetching USDT pairs (attempt {attempt + 1}): {e}. Retrying in {wait_time:.2f}s...")
             await asyncio.sleep(wait_time)
@@ -56,12 +56,16 @@ async def get_usdt_pairs():
     print("❌ Failed to fetch USDT pairs after multiple attempts.")
     return []
 
+
 # ---- Step 3: Fetch Live Prices in Batches ----
 async def fetch_prices(symbols):
     url = "https://api.binance.com/api/v3/ticker/price"
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-            async with session.get(url) as response:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=10),
+            connector=aiohttp.TCPConnector(ssl=False)
+        ) as session:
+            async with session.get(url, proxy=PROXY) as response:
                 data = await response.json()
                 return {item["symbol"]: float(item["price"]) for item in data if item["symbol"] in symbols}
     except Exception as e:
@@ -73,11 +77,14 @@ async def fetch_historical_data(symbols):
     url = "https://api.binance.com/api/v3/klines"
     end_time = int(datetime.utcnow().timestamp() * 1000)
     start_time = int((datetime.utcnow() - timedelta(days=1)).timestamp() * 1000)
-    
+
     closing_prices = {}
     batch_size = 10  # ✅ Fetch data in smaller batches to avoid overload
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+    async with aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=10),
+        connector=aiohttp.TCPConnector(ssl=False)
+    ) as session:
         for i in range(0, len(symbols), batch_size):
             batch_symbols = symbols[i:i + batch_size]
             tasks = [
@@ -87,9 +94,9 @@ async def fetch_historical_data(symbols):
                     "startTime": start_time,
                     "endTime": end_time,
                     "limit": 1
-                }) for symbol in batch_symbols
+                }, proxy=PROXY) for symbol in batch_symbols
             ]
-            
+
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 
             for symbol, response in zip(batch_symbols, responses):
@@ -97,7 +104,7 @@ async def fetch_historical_data(symbols):
                     print(f"⚠️ Error fetching historical data for {symbol}: {response}")
                     closing_prices[symbol] = "N/A"
                     continue
-                
+
                 try:
                     data = await response.json()
                     closing_prices[symbol] = float(data[0][4]) if data else "N/A"
