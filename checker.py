@@ -38,7 +38,7 @@ HEADERS = {"X-MBX-APIKEY": BINANCE_API_KEY} if BINANCE_API_KEY else {}
 
 # ---- Fetch All USDT Trading Pairs ----
 async def get_usdt_pairs():
-    url = "https://api.binance.com/api/v3/exchangeInfo"
+    url = "https://api.binance.us/api/v3/exchangeInfo"
     max_retries = 5
 
     for attempt in range(max_retries):
@@ -68,7 +68,7 @@ async def get_usdt_pairs():
 
 # ---- Fetch Live Prices ----
 async def fetch_prices(symbols):
-    url = "https://api.binance.com/api/v3/ticker/price"
+    url = "https://api.binance.us/api/v3/ticker/price"
     proxy = random.choice(PROXIES)  # Rotate proxy
 
     try:
@@ -86,7 +86,7 @@ async def fetch_prices(symbols):
 
 # ---- Fetch Previous Day's Closing Prices ----
 async def fetch_historical_data(symbols):
-    url = "https://api.binance.com/api/v3/klines"
+    url = "https://api.binance.us/api/v3/klines"
     end_time = int(datetime.utcnow().timestamp() * 1000)
     start_time = int((datetime.utcnow() - timedelta(days=1)).timestamp() * 1000)
     proxy = random.choice(PROXIES)  # Rotate proxy
