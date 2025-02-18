@@ -28,7 +28,7 @@ if not SHEET_NAME:
 sheet = client.open(SHEET_NAME).sheet1  # First sheet
 
 # ---- Binance API Configuration ----
-BINANCE_API_KEY = os.getenv("MiHw4ZyTFiZVDwGxdORAW0PbXqzchwGLmWoE25tt0XDoGnv436T3N0nA3tQvSVYg")  # Load from environment
+BINANCE_API_KEY = os.getenv("api")  # Load from environment
 HEADERS = {"X-MBX-APIKEY": BINANCE_API_KEY} if BINANCE_API_KEY else {}
 
 # ---- Fetch All USDT Trading Pairs ----
